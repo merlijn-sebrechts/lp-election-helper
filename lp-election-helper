@@ -1,4 +1,5 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
+
 from launchpadlib.launchpad import Launchpad
 import argparse
 import sys
@@ -6,9 +7,9 @@ import os
 import subprocess
 
 GPG_COMMAND = "gpg --keyserver=keyserver.ubuntu.com --batch --search-keys "
-DEVNULL = open(os.devnull, 'wb') # Python3: subprocess.DEVNULL
+DEVNULL = subprocess.DEVNULL
 
-VERSION = "lp-election-helper 1.0"
+VERSION = "lp-election-helper 2.0"
 DESCRIPTION = "Harvests public email addresses from a launchpad group"
 HELP_END = """
     This script requires logging in to a Launchpad account with permission to view the email address
@@ -48,62 +49,39 @@ def find_preferred_domain(emails):
 
 def extract_mails_from_key(fingerprint):
     command = GPG_COMMAND + "0x" + fingerprint + " | tee"
-    gpg_output = subprocess.check_output(command, shell=True, stderr=DEVNULL)
+    gpg_output = subprocess.check_output(command, shell=True, stderr=DEVNULL, universal_newlines=True)
     possible_emails = [line for line in gpg_output.split('<') if '>' in line]
-    emails = [line.split('>')[0] for line in possible_emails]
-    for email in emails:
-        yield email
-    # Python3: replace last 3 lines with: yield from (line.split('>')[0] for line in possible_emails)
+    yield from (line.split('>')[0] for line in possible_emails)
 
 def extract_mails_from_keys(gpg_keys):
     emails = []
     for key in gpg_keys:
-        for email in extract_mails_from_key(key.fingerprint):
-            emails.append(email)
-    for email in emails:
-        yield email
-    # Python3: replace last 4 lines with: yield from extract_mails_from_key(key.fingerprint)
+        yield from extract_mails_from_key(key.fingerprint)
 
 def get_email(person):
     try:
         email = person.preferred_email_address.email
         return email
     except ValueError:
-        emails = [p.email for p in person.confirmed_email_addresses] or \
-                 [email for email in extract_mails_from_keys(person.gpg_keys)]
-        if emails:
-            return find_preferred_domain(emails)
-    return "-"
+        return f"{person.name}@ubuntu.com"
 
 def main():
     launchpad = Launchpad.login_with('mails', 'production', os.path.expanduser("~/.launchpadlib/cache/"))
     members = [member for member in launchpad.people[search_group].participants if not member.is_team]
 
     missed_accounts = []
-    print "#### Members with verified public email addresses ####"
-    print
     for member in members:
         email = get_email(member)
         if email in blacklist:
             continue
-        if email is not "-":
-            if args.names:
-                print "%s <%s>" % (member.display_name, email)
-            else:
-                print email
+        if args.names:
+            print(f"{member.display_name} <{email}>")
         else:
-            missed_account = "%s (%s)" % (member.display_name, member.name)
-            missed_accounts.append(missed_account)
-    print
-    print "#### Members with no public email address or GPG key ####"
-    print
-    for missed_account in missed_accounts:
-        print missed_account
+            print(email)
 
 if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print >> sys.stderr, "Aborted."
+        print("Aborted.", file=sys. stderr)
         sys.exit(1)
-
